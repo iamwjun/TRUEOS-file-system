@@ -1,9 +1,9 @@
 mod html;
 mod tree;
 
-use std::env;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::env;
 
 use axum::{
     extract::{Path as AxumPath, State},
@@ -17,6 +17,48 @@ use tower_http::services::ServeDir;
 use tree::{resolve_under_root, scan_dir};
 
 const PORT: u16 = 54321;
+pub(crate) const DEMO_FILES: [(&str, &str); 10] = [
+    (
+        "demo-data/README.txt",
+        "TRUEOS file-system demo data\n\nThis directory is created by the blueprint at startup.\n",
+    ),
+    (
+        "demo-data/docs/intro.md",
+        "# Demo Files\n\nThe file-system blueprint can serve direct files and tree pages.\n",
+    ),
+    (
+        "demo-data/docs/routes.md",
+        "# Routes\n\n/ and /tree render the tree. Direct paths serve files through tower-http.\n",
+    ),
+    (
+        "demo-data/notes/todo.txt",
+        "- verify tree rendering\n- open a direct file URL\n- test nested folders\n",
+    ),
+    (
+        "demo-data/notes/status.txt",
+        "status=seeded\nservice=file-system\ntransport=http\n",
+    ),
+    (
+        "demo-data/assets/index.html",
+        "<!doctype html><title>TRUEOS demo</title><h1>TRUEOS file-system demo</h1>\n",
+    ),
+    (
+        "demo-data/assets/style.css",
+        "body { font-family: sans-serif; margin: 2rem; }\nh1 { color: #2457d6; }\n",
+    ),
+    (
+        "demo-data/logs/boot.log",
+        "demo: blueprint startup seed complete\n",
+    ),
+    (
+        "demo-data/logs/http.log",
+        "demo: awaiting requests on 0.0.0.0:54321\n",
+    ),
+    (
+        "demo-data/data/sample.json",
+        "{ \"name\": \"TRUEOS\", \"app\": \"file-system\", \"files\": 10 }\n",
+    ),
+];
 
 #[derive(Clone)]
 struct AppState {
@@ -30,17 +72,10 @@ async fn main() {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
 
-    let root = match root.canonicalize() {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("invalid root directory {}: {e}", root.display());
-            std::process::exit(1);
-        }
-    };
+    let root = normalize_root(root);
 
-    if !root.is_dir() {
-        eprintln!("root is not a directory: {}", root.display());
-        std::process::exit(1);
+    if let Err(err) = seed_demo_data(&root).await {
+        eprintln!("demo data seed failed under {}: {err}", root.display());
     }
 
     let state = AppState { root: root.clone() };
@@ -72,6 +107,31 @@ async fn main() {
         });
 }
 
+async fn seed_demo_data(root: &Path) -> tokio::io::Result<()> {
+    for (relative, body) in DEMO_FILES {
+        let path = root.join(relative);
+        if let Some(parent) = path.parent() {
+            match tokio::fs::create_dir_all(parent.display().to_string()).await {
+                Ok(()) => {}
+                Err(err) if err.kind() == tokio::io::ErrorKind::AlreadyExists => {}
+                Err(err) => return Err(err),
+            }
+        }
+        tokio::fs::write(path.display().to_string(), body).await?;
+    }
+
+    Ok(())
+}
+
+fn normalize_root(root: PathBuf) -> PathBuf {
+    let text = root.display().to_string();
+    if text.trim().is_empty() {
+        PathBuf::from(".")
+    } else {
+        root
+    }
+}
+
 async fn tree_root(State(state): State<AppState>) -> Result<Html<String>, AppError> {
     render_tree(&state, &state.root, "")
 }
@@ -81,9 +141,6 @@ async fn tree_subdir(
     AxumPath(path): AxumPath<String>,
 ) -> Result<Html<String>, AppError> {
     let dir = resolve_under_root(&state.root, &path).ok_or(AppError::NotFound)?;
-    if !dir.is_dir() {
-        return Err(AppError::NotFound);
-    }
     render_tree(&state, &dir, &path)
 }
 
