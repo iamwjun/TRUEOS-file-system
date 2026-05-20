@@ -62,6 +62,33 @@ pub struct TileDebugFrameStyle {
     pub palette: [[CssColor; 12]; 6],
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ColorRampStyle {
+    pub start: CssColor,
+    pub middle: CssColor,
+    pub end: CssColor,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TerminalTestPatternStyle {
+    pub name: &'static str,
+    pub terminal_width_chars: u16,
+    pub terminal_height_rows: u16,
+    pub background: CssColor,
+    pub panel: CssColor,
+    pub text_dark: CssColor,
+    pub text_blue: CssColor,
+    pub grid: LineStyle,
+    pub accent_green: CssColor,
+    pub white: CssColor,
+    pub black: CssColor,
+    pub primary_bars: [CssColor; 8],
+    pub grayscale: ColorRampStyle,
+    pub red_ramp: ColorRampStyle,
+    pub green_ramp: ColorRampStyle,
+    pub blue_ramp: ColorRampStyle,
+}
+
 pub const TRUEOS_TILE_DEBUG_FRAME_0: TileDebugFrameStyle = TileDebugFrameStyle {
     name: "TRUEOS TILE DEBUG FRAME 0",
     canvas_width_px: 1920,
@@ -224,6 +251,53 @@ pub const TRUEOS_TILE_DEBUG_FRAME_0: TileDebugFrameStyle = TileDebugFrameStyle {
     ],
 };
 
+pub const BUROSCH_AVEC_TERMINAL_PATTERN: TerminalTestPatternStyle = TerminalTestPatternStyle {
+    name: "BUROSCH AVEC TERMINAL TEST PATTERN",
+    terminal_width_chars: 88,
+    terminal_height_rows: 34,
+    background: CssColor::rgb(0x7D, 0x7D, 0x7D),
+    panel: CssColor::rgb(0xD7, 0xDA, 0xE1),
+    text_dark: CssColor::rgb(0x16, 0x16, 0x16),
+    text_blue: CssColor::rgb(0x1A, 0x46, 0xB0),
+    grid: LineStyle {
+        color: CssColor::rgb(0xE7, 0xE7, 0xE7),
+        width_px: 1,
+    },
+    accent_green: CssColor::rgb(0x20, 0xD8, 0x3A),
+    white: CssColor::rgb(0xEB, 0xEB, 0xEB),
+    black: CssColor::rgb(0x10, 0x10, 0x10),
+    primary_bars: [
+        CssColor::rgb(0xEB, 0xEB, 0xEB),
+        CssColor::rgb(0xEB, 0xEB, 0x12),
+        CssColor::rgb(0x0F, 0xEC, 0xED),
+        CssColor::rgb(0x10, 0xEC, 0x26),
+        CssColor::rgb(0xCD, 0x2E, 0xCD),
+        CssColor::rgb(0xEB, 0x10, 0x34),
+        CssColor::rgb(0x3E, 0x11, 0xBC),
+        CssColor::rgb(0x10, 0x10, 0x10),
+    ],
+    grayscale: ColorRampStyle {
+        start: CssColor::rgb(0x10, 0x10, 0x10),
+        middle: CssColor::rgb(0x7E, 0x7E, 0x7E),
+        end: CssColor::rgb(0xE2, 0xE2, 0xE2),
+    },
+    red_ramp: ColorRampStyle {
+        start: CssColor::rgb(0xE4, 0xD5, 0xCE),
+        middle: CssColor::rgb(0xF3, 0x10, 0x18),
+        end: CssColor::rgb(0x10, 0x10, 0x10),
+    },
+    green_ramp: ColorRampStyle {
+        start: CssColor::rgb(0xCE, 0xE7, 0xD2),
+        middle: CssColor::rgb(0x19, 0xF0, 0x19),
+        end: CssColor::rgb(0x0B, 0x20, 0x0B),
+    },
+    blue_ramp: ColorRampStyle {
+        start: CssColor::rgb(0xC2, 0xC4, 0xDD),
+        middle: CssColor::rgb(0x2F, 0x2F, 0xDC),
+        end: CssColor::rgb(0x0D, 0x0D, 0x22),
+    },
+};
+
 impl CssColor {
     pub const fn rgb(r: u8, g: u8, b: u8) -> Self {
         Self { r, g, b, a: 0xFF }
@@ -243,6 +317,19 @@ impl CssColor {
         } else {
             let alpha = (self.a as f32) / 255.0;
             format!("rgba({}, {}, {}, {:.3})", self.r, self.g, self.b, alpha)
+        }
+    }
+
+    pub fn lerp(self, other: Self, t: f32) -> Self {
+        let mix = |from: u8, to: u8| -> u8 {
+            ((from as f32) + ((to as f32) - (from as f32)) * t.clamp(0.0, 1.0)).round() as u8
+        };
+
+        Self {
+            r: mix(self.r, other.r),
+            g: mix(self.g, other.g),
+            b: mix(self.b, other.b),
+            a: mix(self.a, other.a),
         }
     }
 }
@@ -320,9 +407,20 @@ impl TileDebugFrameStyle {
     }
 }
 
+impl ColorRampStyle {
+    pub fn sample(self, position: f32) -> CssColor {
+        let position = position.clamp(0.0, 1.0);
+        if position <= 0.5 {
+            self.start.lerp(self.middle, position * 2.0)
+        } else {
+            self.middle.lerp(self.end, (position - 0.5) * 2.0)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::TRUEOS_TILE_DEBUG_FRAME_0;
+    use super::{BUROSCH_AVEC_TERMINAL_PATTERN, TRUEOS_TILE_DEBUG_FRAME_0};
 
     #[test]
     fn frame_0_has_expected_grid_geometry() {
@@ -347,5 +445,17 @@ mod tests {
         let css = TRUEOS_TILE_DEBUG_FRAME_0.to_css_custom_properties("trueos-tile");
         assert!(css.contains("--trueos-tile-r0-c0: #DE3329;"));
         assert!(css.contains("--trueos-tile-r5-c11: #98775A;"));
+    }
+
+    #[test]
+    fn burosch_primary_bars_keep_reference_order() {
+        assert_eq!(
+            BUROSCH_AVEC_TERMINAL_PATTERN.primary_bars[0].to_hex_rgb(),
+            "#EBEBEB"
+        );
+        assert_eq!(
+            BUROSCH_AVEC_TERMINAL_PATTERN.primary_bars[7].to_hex_rgb(),
+            "#101010"
+        );
     }
 }
