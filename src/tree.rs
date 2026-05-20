@@ -3,7 +3,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::AppError;
-use crate::AppState;
 use crate::DEMO_FILES;
 
 #[derive(Debug)]
@@ -19,7 +18,7 @@ pub enum TreeNode {
     },
 }
 
-pub fn scan_dir(_state: &AppState, dir: &Path, rel: &str) -> Result<Vec<TreeNode>, AppError> {
+pub fn scan_dir(dir: &Path, rel: &str) -> Result<Vec<TreeNode>, AppError> {
     let mut entries = Vec::new();
     let read_dir = match fs::read_dir(dir) {
         Ok(read_dir) => read_dir,
@@ -43,7 +42,7 @@ pub fn scan_dir(_state: &AppState, dir: &Path, rel: &str) -> Result<Vec<TreeNode
         };
 
         if file_type.is_dir() {
-            let children = scan_dir(_state, &entry.path(), &child_rel)?;
+            let children = scan_dir(&entry.path(), &child_rel)?;
             entries.push(TreeNode::Dir {
                 name,
                 rel_path: child_rel,
@@ -60,9 +59,7 @@ pub fn scan_dir(_state: &AppState, dir: &Path, rel: &str) -> Result<Vec<TreeNode
     entries.sort_by(|a, b| {
         let (a_dir, a_name) = node_sort_key(a);
         let (b_dir, b_name) = node_sort_key(b);
-        b_dir
-            .cmp(&a_dir)
-            .then_with(|| a_name.cmp(b_name))
+        b_dir.cmp(&a_dir).then_with(|| a_name.cmp(b_name))
     });
 
     Ok(entries)
@@ -131,7 +128,10 @@ fn node_sort_key(node: &TreeNode) -> (bool, &str) {
 }
 
 pub fn encode_path_segments(path: &str) -> String {
-    path.split('/').map(encode_segment).collect::<Vec<_>>().join("/")
+    path.split('/')
+        .map(encode_segment)
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 fn encode_segment(segment: &str) -> String {

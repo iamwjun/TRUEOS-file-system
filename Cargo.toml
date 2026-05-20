@@ -4,6 +4,7 @@ version = "0.0.1"
 edition = "2024"
 
 [dependencies]
-axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio"] }
-tokio = { version = "1.52.3", features = ["fs", "macros", "rt-multi-thread", "net"] }
+axum = { version = "0.8.9", default-features = false, features = ["form", "http1", "multipart", "tokio"] }
+serde = { version = "1.0.228", features = ["derive"] }
+tokio = { version = "1.52.3", features = ["fs", "macros", "net", "rt-multi-thread", "sync", "time"] }
 tower-http = { version = "=0.6.9", features = ["fs"] }

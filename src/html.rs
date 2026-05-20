@@ -1,372 +1,391 @@
 use std::path::Path;
 
-use crate::tree::{encode_path_segments, TreeNode};
+use crate::tree::{TreeNode, encode_path_segments};
+use file_system::jobs::{JobSnapshot, JobStatus};
 
-const STYLES: &str = r#"
-  :root {
-    color-scheme: light dark;
-    --bg: #f0f2f5;
-    --surface: #ffffff;
-    --surface-2: #f8f9fb;
-    --border: #e4e7ec;
-    --text: #101828;
-    --muted: #667085;
-    --accent: #444ce7;
-    --accent-hover: #3538cd;
-    --accent-soft: #eef4ff;
-    --folder: #f79009;
-    --folder-bg: #fffaeb;
-    --file: #12b76a;
-    --file-bg: #ecfdf3;
-    --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 8px 24px rgba(16, 24, 40, 0.08);
-    --radius: 12px;
-    --radius-sm: 8px;
-    --font: "SF Pro Text", "Segoe UI", system-ui, -apple-system, sans-serif;
-    --mono: ui-monospace, "SF Mono", "Cascadia Code", monospace;
-  }
+pub const STYLE_PATH: &str = "/ui/style.css";
 
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0c111d;
-      --surface: #151b28;
-      --surface-2: #1c2433;
-      --border: #2a3447;
-      --text: #f2f4f7;
-      --muted: #98a2b3;
-      --accent: #8098f9;
-      --accent-hover: #a4bcfd;
-      --accent-soft: #1d2939;
-      --folder: #fdb022;
-      --folder-bg: #422006;
-      --file: #32d583;
-      --file-bg: #053321;
-      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px rgba(0, 0, 0, 0.45);
-    }
-  }
+pub fn stylesheet() -> &'static str {
+    include_str!("../assets/ui.css")
+}
 
-  * { box-sizing: border-box; }
-
-  body {
-    margin: 0;
-    min-height: 100vh;
-    font-family: var(--font);
-    font-size: 15px;
-    line-height: 1.5;
-    color: var(--text);
-    background:
-      radial-gradient(ellipse 80% 50% at 50% -20%, rgba(68, 76, 231, 0.12), transparent),
-      var(--bg);
-    padding: 2rem 1rem 3rem;
-  }
-
-  .page {
-    max-width: 52rem;
-    margin: 0 auto;
-  }
-
-  .card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow);
-    overflow: hidden;
-  }
-
-  .header {
-    padding: 1.5rem 1.5rem 1.25rem;
-    border-bottom: 1px solid var(--border);
-    background: linear-gradient(180deg, var(--surface-2) 0%, var(--surface) 100%);
-  }
-
-  .header-top {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    margin-bottom: 0.75rem;
-  }
-
-  .logo {
-    width: 2.25rem;
-    height: 2.25rem;
-    border-radius: 10px;
-    background: linear-gradient(135deg, var(--accent) 0%, #7a5af8 100%);
-    display: grid;
-    place-items: center;
-    color: #fff;
-    font-size: 1.1rem;
-    flex-shrink: 0;
-  }
-
-  h1 {
-    margin: 0;
-    font-size: 1.35rem;
-    font-weight: 650;
-    letter-spacing: -0.02em;
-  }
-
-  .subtitle {
-    margin: 0.15rem 0 0;
-    font-size: 0.875rem;
-    color: var(--muted);
-  }
-
-  .path-bar {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.5rem;
-    padding: 0.625rem 0.75rem;
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    font-family: var(--mono);
-    font-size: 0.8125rem;
-    color: var(--muted);
-    word-break: break-all;
-    line-height: 1.45;
-  }
-
-  .path-bar::before {
-    content: "⌁";
-    flex-shrink: 0;
-    color: var(--accent);
-    font-family: var(--font);
-    font-weight: 600;
-  }
-
-  .nav {
-    padding: 0.875rem 1.5rem 0;
-  }
-
-  .nav a {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    padding: 0.4rem 0.85rem;
-    font-size: 0.8125rem;
-    font-weight: 500;
-    color: var(--accent);
-    text-decoration: none;
-    background: var(--accent-soft);
-    border: 1px solid transparent;
-    border-radius: 999px;
-    transition: background 0.15s, border-color 0.15s, color 0.15s;
-  }
-
-  .nav a:hover {
-    color: var(--accent-hover);
-    border-color: var(--border);
-    background: var(--surface-2);
-  }
-
-  .tree-wrap {
-    padding: 1rem 1.25rem 1.5rem;
-  }
-
-  .tree-stats {
-    padding: 0 0.25rem 0.75rem;
-    font-size: 0.75rem;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--muted);
-  }
-
-  ul.tree {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
-
-  ul.tree ul.tree {
-    margin-left: 1.125rem;
-    padding-left: 0.875rem;
-    border-left: 1px dashed var(--border);
-  }
-
-  li.tree-item {
-    margin: 0.2rem 0;
-  }
-
-  .tree-row {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.45rem 0.6rem;
-    border-radius: var(--radius-sm);
-    transition: background 0.12s;
-  }
-
-  .tree-row:hover {
-    background: var(--surface-2);
-  }
-
-  .icon {
-    width: 1.75rem;
-    height: 1.75rem;
-    border-radius: 6px;
-    display: grid;
-    place-items: center;
-    font-size: 0.9rem;
-    flex-shrink: 0;
-  }
-
-  .icon.folder {
-    background: var(--folder-bg);
-    color: var(--folder);
-  }
-
-  .icon.file {
-    background: var(--file-bg);
-    color: var(--file);
-  }
-
-  .name {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-weight: 500;
-  }
-
-  li.file .name a {
-    color: var(--text);
-    text-decoration: none;
-    transition: color 0.12s;
-  }
-
-  li.file .name a:hover {
-    color: var(--accent);
-  }
-
-  .action {
-    flex-shrink: 0;
-    padding: 0.2rem 0.55rem;
-    font-size: 0.75rem;
-    font-weight: 500;
-    color: var(--muted);
-    text-decoration: none;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface);
-    opacity: 0;
-    transition: opacity 0.12s, color 0.12s, border-color 0.12s;
-  }
-
-  .tree-row:hover .action {
-    opacity: 1;
-  }
-
-  .action:hover {
-    color: var(--accent);
-    border-color: var(--accent);
-  }
-
-  .empty {
-    padding: 2.5rem 1rem;
-    text-align: center;
-    color: var(--muted);
-    font-size: 0.9375rem;
-  }
-
-  .empty-icon {
-    font-size: 2rem;
-    margin-bottom: 0.5rem;
-    opacity: 0.5;
-  }
-
-  footer {
-    margin-top: 1.25rem;
-    text-align: center;
-    font-size: 0.75rem;
-    color: var(--muted);
-  }
-"#;
-
-pub fn render_tree_page(root: &Path, current: &Path, rel: &str, nodes: &[TreeNode]) -> String {
+pub fn render_tree_page(
+    current: &Path,
+    rel: &str,
+    nodes: &[TreeNode],
+    jobs: &[JobSnapshot],
+) -> String {
     let title = if rel.is_empty() {
-        root.display().to_string()
+        "File tree".to_string()
     } else {
-        rel.to_string()
+        format!("{rel} · File tree")
     };
+    let body = render_tree_body(current, rel, nodes, jobs);
+    render_document(&title, &body, None)
+}
 
+pub fn render_jobs_page(root: &Path, jobs: &[JobSnapshot]) -> String {
+    let body = format!(
+        r#"
+<div class="shell">
+  <section class="header-card">
+    <div class="header-card__top">
+      <div class="brand">
+        <div class="brand__mark" aria-hidden="true">⌘</div>
+        <div>
+          <p class="eyebrow">TRUEOS File System</p>
+          <h1>Asynchronous Job Queue</h1>
+          <p class="subtitle">Background file operations are queued and executed by the backend worker.</p>
+        </div>
+      </div>
+      <div class="path-bar">{root_path}</div>
+    </div>
+    <div class="header-card__nav">
+      <a class="pill-link" href="/tree">Back to tree</a>
+    </div>
+  </section>
+
+  <section class="panel section-gap">
+    <div class="panel__header">
+      <h2>Recent jobs</h2>
+      <p>Queue status across move, delete, upload, and download preparation tasks.</p>
+    </div>
+    <div class="panel__body">
+      {jobs_html}
+    </div>
+  </section>
+
+  <footer class="footer">Shared CSS and asynchronous worker enabled under S002.</footer>
+</div>
+"#,
+        root_path = escape_html(&root.display().to_string()),
+        jobs_html = render_jobs_list(jobs, true),
+    );
+
+    render_document("Job queue", &body, None)
+}
+
+pub fn render_job_page(root: &Path, job: &JobSnapshot) -> String {
+    let body = format!(
+        r#"
+<div class="shell">
+  <section class="detail-card">
+    <div class="header-card__top">
+      <div class="brand">
+        <div class="brand__mark" aria-hidden="true">⚙</div>
+        <div>
+          <p class="eyebrow">Background task</p>
+          <h1>Job #{job_id}</h1>
+          <p class="subtitle">{summary}</p>
+        </div>
+      </div>
+      <div class="path-bar">{root_path}</div>
+    </div>
+    <div class="header-card__nav">
+      <a class="pill-link" href="/jobs">All jobs</a>
+      <a class="action-link action-link--secondary" href="/tree">Back to tree</a>
+    </div>
+    <div class="panel__body">
+      <span class="status-badge status-badge--{status_class}">{status_label}</span>
+      <dl class="job-detail-grid">
+        <dt>Operation</dt>
+        <dd>{operation}</dd>
+        <dt>Summary</dt>
+        <dd>{summary}</dd>
+        <dt>Detail</dt>
+        <dd class="mono">{detail}</dd>
+        <dt>Result path</dt>
+        <dd>{result_path}</dd>
+      </dl>
+      {message_html}
+    </div>
+  </section>
+
+  <footer class="footer">Active jobs auto-refresh every 2 seconds until completion.</footer>
+</div>
+"#,
+        job_id = job.id,
+        summary = escape_html(&job.summary),
+        root_path = escape_html(&root.display().to_string()),
+        status_class = job.status_class(),
+        status_label = job.status_label(),
+        operation = job.kind.label(),
+        detail = escape_html(&job.detail),
+        result_path = render_result_path(job),
+        message_html = render_job_message(job),
+    );
+
+    let refresh = if job.status.is_terminal() {
+        None
+    } else {
+        Some(2)
+    };
+    render_document(&format!("Job #{}", job.id), &body, refresh)
+}
+
+fn render_tree_body(current: &Path, rel: &str, nodes: &[TreeNode], jobs: &[JobSnapshot]) -> String {
+    let title = if rel.is_empty() {
+        "Root directory".to_string()
+    } else {
+        format!("Directory · {rel}")
+    };
+    let subtitle = if rel.is_empty() {
+        "Browse files and dispatch background file operations from one place.".to_string()
+    } else {
+        format!("Current relative path: /{rel}")
+    };
     let (dir_count, file_count) = count_nodes(nodes);
 
-    let body = if nodes.is_empty() {
-        r#"<div class="empty"><div class="empty-icon">📂</div><p>This directory is empty</p></div>"#
-            .to_string()
-    } else {
-        let mut tree = String::from("<ul class=\"tree\">\n");
-        for node in nodes {
-            render_node(&mut tree, node);
-        }
-        tree.push_str("</ul>\n");
-        tree
-    };
-
-    let parent_link = if rel.is_empty() {
-        String::new()
-    } else {
-        let parent = rel.rfind('/').map(|i| &rel[..i]).unwrap_or("");
-        let href = if parent.is_empty() {
-            "/tree".to_string()
-        } else {
-            format!("/tree/{}", encode_path_segments(parent))
-        };
-        format!(
-            r#"<nav class="nav"><a href="{href}"><span aria-hidden="true">←</span> Parent directory</a></nav>"#
-        )
-    };
-
-    let stats = if nodes.is_empty() {
-        String::new()
-    } else {
-        format!("{dir_count} folders · {file_count} files")
-    };
-
     format!(
-        r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{title} · File tree</title>
-  <style>{styles}</style>
-</head>
-<body>
-  <div class="page">
-    <div class="card">
-      <header class="header">
-        <div class="header-top">
-          <div class="logo" aria-hidden="true">⬡</div>
-          <div>
-            <h1>File tree</h1>
-            <p class="subtitle">Browse static files</p>
-          </div>
+        r#"
+<div class="shell">
+  <section class="header-card">
+    <div class="header-card__top">
+      <div class="brand">
+        <div class="brand__mark" aria-hidden="true">⬡</div>
+        <div>
+          <p class="eyebrow">TRUEOS File System</p>
+          <h1>{title}</h1>
+          <p class="subtitle">{subtitle}</p>
         </div>
-        <div class="path-bar">{root_display}</div>
-      </header>
-      {parent_link}
-      <div class="tree-wrap">
-        {stats_html}
-        {body}
       </div>
+      <div class="path-bar">{current_path}</div>
     </div>
-    <footer>TRUEOS File System</footer>
+    <div class="header-card__nav">
+      {parent_link}
+      <a class="action-link action-link--secondary" href="/jobs">View job queue</a>
+    </div>
+  </section>
+
+  <div class="layout">
+    <section class="panel">
+      <div class="panel__header">
+        <h2>File tree</h2>
+        <p>Directories open through tree routes. Files keep direct static URLs.</p>
+      </div>
+      <div class="panel__body">
+        {stats_html}
+        {tree_html}
+      </div>
+    </section>
+
+    <div class="stack">
+      <section class="panel">
+        <div class="panel__header">
+          <h2>Dispatch operations</h2>
+          <p>These forms enqueue background jobs instead of blocking the request path.</p>
+        </div>
+        <div class="panel__body">
+          {forms_html}
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel__header">
+          <h2>Recent jobs</h2>
+          <p>The backend worker processes one job at a time from the queue.</p>
+        </div>
+        <div class="panel__body">
+          {jobs_html}
+        </div>
+      </section>
+    </div>
   </div>
-</body>
-</html>"#,
-        title = escape(&title),
-        styles = STYLES,
-        root_display = escape(&current.display().to_string()),
-        parent_link = parent_link,
-        stats_html = if stats.is_empty() {
-            String::new()
-        } else {
-            format!(r#"<p class="tree-stats">{stats}</p>"#)
-        },
-        body = body,
+
+  <footer class="footer">Shared visual tokens are served from one reusable CSS file.</footer>
+</div>
+"#,
+        title = escape_html(&title),
+        subtitle = escape_html(&subtitle),
+        current_path = escape_html(&current.display().to_string()),
+        parent_link = render_parent_link(rel),
+        stats_html = render_tree_stats(dir_count, file_count),
+        tree_html = render_tree(nodes),
+        forms_html = render_job_forms(rel),
+        jobs_html = render_jobs_list(jobs, false),
     )
+}
+
+fn render_tree(nodes: &[TreeNode]) -> String {
+    if nodes.is_empty() {
+        return r#"<div class="empty-state"><span class="empty-state__icon">📂</span><p>This directory is empty.</p></div>"#
+            .to_string();
+    }
+
+    let mut tree = String::from(r#"<ul class="tree">"#);
+    for node in nodes {
+        render_node(&mut tree, node);
+    }
+    tree.push_str("</ul>");
+    tree
+}
+
+fn render_job_forms(rel: &str) -> String {
+    let upload_dir = escape_attr(rel);
+    format!(
+        r#"
+<div class="stack">
+  <form class="form-card form-grid" action="/jobs/move" method="post">
+    <div>
+      <h3>Move</h3>
+      <p>Queue a rename or move operation inside the configured root.</p>
+    </div>
+    <div class="field">
+      <label for="move-source">Source path</label>
+      <input id="move-source" type="text" name="source" placeholder="demo-data/docs/intro.md" required>
+    </div>
+    <div class="field">
+      <label for="move-destination">Destination path</label>
+      <input id="move-destination" type="text" name="destination" placeholder="demo-data/archive/intro.md" required>
+    </div>
+    <button type="submit">Queue move job</button>
+  </form>
+
+  <form class="form-card form-grid" action="/jobs/delete" method="post">
+    <div>
+      <h3>Delete</h3>
+      <p>Remove a file or directory through the background worker.</p>
+    </div>
+    <div class="field">
+      <label for="delete-target">Target path</label>
+      <input id="delete-target" type="text" name="target" placeholder="demo-data/logs/http.log" required>
+    </div>
+    <button type="submit">Queue delete job</button>
+  </form>
+
+  <form class="form-card form-grid" action="/jobs/upload" method="post" enctype="multipart/form-data">
+    <div>
+      <h3>Upload</h3>
+      <p>Upload a file and let the queue write it into the selected directory.</p>
+    </div>
+    <div class="field">
+      <label for="upload-directory">Target directory</label>
+      <input id="upload-directory" type="text" name="directory" value="{upload_dir}" placeholder="demo-data/uploads">
+    </div>
+    <div class="field">
+      <label for="upload-file">File</label>
+      <input id="upload-file" type="file" name="file" required>
+    </div>
+    <button type="submit">Queue upload job</button>
+  </form>
+
+  <form class="form-card form-grid" action="/jobs/download" method="post">
+    <div>
+      <h3>Download</h3>
+      <p>Prepare a staged download copy in the hidden job download area.</p>
+    </div>
+    <div class="field">
+      <label for="download-source">Source file path</label>
+      <input id="download-source" type="text" name="source" placeholder="demo-data/README.txt" required>
+    </div>
+    <button type="submit">Queue download job</button>
+  </form>
+
+  <p class="form-note">All paths are relative to the configured root. Parent traversal with <code>..</code> is rejected.</p>
+</div>
+"#,
+        upload_dir = upload_dir,
+    )
+}
+
+fn render_jobs_list(jobs: &[JobSnapshot], full_page: bool) -> String {
+    if jobs.is_empty() {
+        return r#"<p class="jobs-note">No jobs have been submitted yet.</p>"#.to_string();
+    }
+
+    let mut output = String::from(r#"<div class="jobs">"#);
+    for job in jobs {
+        output.push_str(&format!(
+            r#"
+<article class="job-item">
+  <div class="job-item__top">
+    <div class="job-item__meta">
+      <strong>{operation}</strong>
+      <span class="job-id">Job #{id}</span>
+      <p class="job-summary">{summary}</p>
+    </div>
+    <span class="status-badge status-badge--{status_class}">{status_label}</span>
+  </div>
+  <div class="mono">{detail}</div>
+  {message}
+  <a class="action-link action-link--secondary" href="/jobs/{id}">Open details</a>
+</article>
+"#,
+            operation = job.kind.label(),
+            id = job.id,
+            summary = escape_html(&job.summary),
+            status_class = job.status_class(),
+            status_label = job.status_label(),
+            detail = escape_html(&job.detail),
+            message = render_job_message(job),
+        ));
+    }
+    if !full_page {
+        output.push_str(r#"<a class="pill-link" href="/jobs">Open full queue view</a>"#);
+    }
+    output.push_str("</div>");
+    output
+}
+
+fn render_job_message(job: &JobSnapshot) -> String {
+    if let Some(error) = &job.error {
+        return format!(
+            r#"<div class="message message--error"><strong>Execution error:</strong> {}</div>"#,
+            escape_html(error)
+        );
+    }
+
+    if let Some(path) = &job.result_path {
+        let safe_path = escape_attr(path);
+        let label = escape_html(path);
+        return format!(
+            r#"<div class="message message--success"><strong>Result:</strong> <a href="{safe_path}">{label}</a></div>"#
+        );
+    }
+
+    match job.status {
+        JobStatus::Queued => {
+            r#"<div class="message"><strong>Queued:</strong> waiting for the background worker.</div>"#
+                .to_string()
+        }
+        JobStatus::Running => {
+            r#"<div class="message"><strong>Running:</strong> the background worker is executing this task.</div>"#
+                .to_string()
+        }
+        JobStatus::Succeeded => {
+            r#"<div class="message message--success"><strong>Completed:</strong> no additional artifact path was produced.</div>"#
+                .to_string()
+        }
+        JobStatus::Failed => String::new(),
+    }
+}
+
+fn render_result_path(job: &JobSnapshot) -> String {
+    if let Some(path) = &job.result_path {
+        let safe_href = escape_attr(path);
+        let safe_label = escape_html(path);
+        format!(r#"<a class="mono" href="{safe_href}">{safe_label}</a>"#)
+    } else {
+        "<span class=\"mono\">n/a</span>".to_string()
+    }
+}
+
+fn render_parent_link(rel: &str) -> String {
+    if rel.is_empty() {
+        return r#"<a class="pill-link" href="/tree">Root</a>"#.to_string();
+    }
+
+    let parent = rel.rfind('/').map(|index| &rel[..index]).unwrap_or("");
+    let href = if parent.is_empty() {
+        "/tree".to_string()
+    } else {
+        format!("/tree/{}", encode_path_segments(parent))
+    };
+    format!(r#"<a class="pill-link" href="{href}">Parent directory</a>"#)
+}
+
+fn render_tree_stats(dir_count: usize, file_count: usize) -> String {
+    format!(r#"<p class="tree-stats">{dir_count} folders · {file_count} files</p>"#)
 }
 
 fn count_nodes(nodes: &[TreeNode]) -> (usize, usize) {
@@ -376,9 +395,9 @@ fn count_nodes(nodes: &[TreeNode]) -> (usize, usize) {
         match node {
             TreeNode::Dir { children, .. } => {
                 dirs += 1;
-                let (d, f) = count_nodes(children);
-                dirs += d;
-                files += f;
+                let (child_dirs, child_files) = count_nodes(children);
+                dirs += child_dirs;
+                files += child_files;
             }
             TreeNode::File { .. } => files += 1,
         }
@@ -386,7 +405,7 @@ fn count_nodes(nodes: &[TreeNode]) -> (usize, usize) {
     (dirs, files)
 }
 
-fn render_node(out: &mut String, node: &TreeNode) {
+fn render_node(output: &mut String, node: &TreeNode) {
     match node {
         TreeNode::Dir {
             name,
@@ -394,38 +413,82 @@ fn render_node(out: &mut String, node: &TreeNode) {
             children,
         } => {
             let href = format!("/tree/{}", encode_path_segments(rel_path));
-            out.push_str("<li class=\"tree-item dir\"><div class=\"tree-row\">");
-            out.push_str("<span class=\"icon folder\" aria-hidden=\"true\">📁</span>");
-            out.push_str("<span class=\"name\">");
-            out.push_str(&escape(name));
-            out.push_str("</span>");
-            out.push_str("<a class=\"action\" href=\"");
-            out.push_str(&href);
-            out.push_str("\">Open</a></div>");
+            output.push_str(r#"<li class="tree-item"><div class="tree-row">"#);
+            output.push_str(
+                r#"<span class="tree-icon tree-icon--folder" aria-hidden="true">📁</span>"#,
+            );
+            output.push_str(r#"<span class="tree-name">"#);
+            output.push_str(&escape_html(name));
+            output.push_str("</span>");
+            output.push_str(r#"<div class="tree-actions">"#);
+            output.push_str(&format!(
+                r#"<a class="action-link" href="{}">Open</a>"#,
+                escape_attr(&href)
+            ));
+            output.push_str("</div></div>");
             if !children.is_empty() {
-                out.push_str("\n<ul class=\"tree\">\n");
+                output.push_str(r#"<ul>"#);
                 for child in children {
-                    render_node(out, child);
+                    render_node(output, child);
                 }
-                out.push_str("</ul>\n");
+                output.push_str("</ul>");
             }
-            out.push_str("</li>\n");
+            output.push_str("</li>");
         }
         TreeNode::File { name, url_path } => {
-            out.push_str("<li class=\"tree-item file\"><div class=\"tree-row\">");
-            out.push_str("<span class=\"icon file\" aria-hidden=\"true\">📄</span>");
-            out.push_str("<span class=\"name\"><a href=\"");
-            out.push_str(url_path);
-            out.push_str("\">");
-            out.push_str(&escape(name));
-            out.push_str("</a></span></div></li>\n");
+            output.push_str(r#"<li class="tree-item"><div class="tree-row">"#);
+            output.push_str(
+                r#"<span class="tree-icon tree-icon--file" aria-hidden="true">📄</span>"#,
+            );
+            output.push_str(r#"<span class="tree-name"><a href=""#);
+            output.push_str(&escape_attr(url_path));
+            output.push_str(r#"">"#);
+            output.push_str(&escape_html(name));
+            output.push_str("</a></span>");
+            output.push_str(r#"<div class="tree-actions">"#);
+            output.push_str(&format!(
+                r#"<a class="action-link" href="{}">Open file</a>"#,
+                escape_attr(url_path)
+            ));
+            output.push_str("</div></div></li>");
         }
     }
 }
 
-fn escape(s: &str) -> String {
-    s.replace('&', "&amp;")
+fn render_document(title: &str, body: &str, refresh_seconds: Option<u32>) -> String {
+    let refresh_meta = refresh_seconds
+        .map(|seconds| format!(r#"<meta http-equiv="refresh" content="{seconds}">"#))
+        .unwrap_or_default();
+
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{title}</title>
+  {refresh_meta}
+  <link rel="stylesheet" href="{style_path}">
+</head>
+<body>
+  {body}
+</body>
+</html>"#,
+        title = escape_html(title),
+        refresh_meta = refresh_meta,
+        style_path = STYLE_PATH,
+        body = body,
+    )
+}
+
+fn escape_html(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+}
+
+fn escape_attr(value: &str) -> String {
+    escape_html(value)
 }
