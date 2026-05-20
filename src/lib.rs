@@ -1,3 +1,15 @@
+#[cfg(any(target_os = "trueos", target_os = "zkvm"))]
+extern crate alloc;
+
+#[cfg(any(target_os = "trueos", target_os = "zkvm"))]
+#[path = "lib/path.rs"]
+pub mod path;
+
+#[cfg(not(any(target_os = "trueos", target_os = "zkvm")))]
+pub mod path {
+    pub use std::path::{Component, Components, Path, PathBuf, StripPrefixError};
+}
+
 pub mod jobs;
 pub mod tile_debug_style;
 
